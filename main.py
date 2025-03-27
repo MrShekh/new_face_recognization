@@ -4,12 +4,14 @@ from routes.profile import profile_router
 from routes.attendance import router as attendance_router
 from fastapi.staticfiles import StaticFiles
 import os
+from routes.leave import router as leave_router
 
 app = FastAPI()
 
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(profile_router, prefix="/api", tags=["Profile"])  # ✅ Prefix applied
 app.include_router(attendance_router, prefix="/api")
+app.include_router(leave_router, prefix="/api", tags=["Leave Management"])  # ✅ Added Leave API
 
 # ✅ Ensure `uploads/` directory exists
 os.makedirs("uploads/profile_pictures", exist_ok=True)

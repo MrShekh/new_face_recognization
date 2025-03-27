@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from typing import List, Optional
 from bson import ObjectId
 from database.connection import db
@@ -8,11 +8,16 @@ import os
 
 profile_router = APIRouter()
 
+# ✅ Define Directories
 UPLOAD_DIR = "uploads/"
-PROFILE_PIC_DIR = os.path.join(UPLOAD_DIR, "profile_pictures")
+DATASET_DIR = "dataset"  # ✅ Profile Pictures should go here
+DOCUMENTS_DIR = os.path.join(UPLOAD_DIR, "documents")
+CERTIFICATES_DIR = os.path.join(UPLOAD_DIR, "certificates")
 
-# Ensure the upload directories exist
-os.makedirs(PROFILE_PIC_DIR, exist_ok=True)
+# ✅ Ensure directories exist
+os.makedirs(DATASET_DIR, exist_ok=True)
+os.makedirs(DOCUMENTS_DIR, exist_ok=True)
+os.makedirs(CERTIFICATES_DIR, exist_ok=True)
 
 def get_location_from_pincode(pincode: str):
     """Fetch district, state, and country from pincode"""
@@ -29,13 +34,13 @@ def get_location_from_pincode(pincode: str):
 
 def save_file(upload: UploadFile, folder: str):
     """Save uploaded file and return its relative path"""
-    file_location = os.path.join(UPLOAD_DIR, folder, upload.filename)
+    file_location = os.path.join(folder, upload.filename)  # ✅ Correct Path
     os.makedirs(os.path.dirname(file_location), exist_ok=True)
+    
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(upload.file, buffer)
     
-    # ✅ Return only the relative file path (without base URL)
-    return file_location
+    return file_location.replace("\\", "/")  # ✅ Convert Windows paths to UNIX format
 
 # ✅ 🚀 Create Profile (POST)
 @profile_router.post("/profile")
@@ -63,29 +68,19 @@ async def create_profile(
     tenth_school_name: str = Form(...),
     tenth_state: str = Form(...),
     tenth_total_marks: int = Form(...),
-    tenth_certificate: UploadFile = File(...),
     tenth_board: str = Form(...),
     tenth_passing_month_year: str = Form(...),
 
     twelfth_school_name: str = Form(...),
     twelfth_state: str = Form(...),
     twelfth_total_marks: int = Form(...),
-    twelfth_certificate: UploadFile = File(...),
     twelfth_board: str = Form(...),
     twelfth_passing_month_year: str = Form(...),
 
-    college_degree_certificate: UploadFile = File(...),
     college_state: str = Form(...),
     college_district: str = Form(...),
     college_cgpa: float = Form(...),
     college_name: str = Form(...),
-
-    # 🔹 Documents
-    aadhaar_card_photo: UploadFile = File(...),
-    pan_card_photo: UploadFile = File(...),
-    resume_cv: UploadFile = File(...),
-    passport_size_photo: UploadFile = File(...),
-    passbook_photo: UploadFile = File(...),
 
     # 🔹 Bank Details
     account_number: str = Form(...),
@@ -108,17 +103,8 @@ async def create_profile(
     if existing_profile:
         raise HTTPException(status_code=400, detail="Profile already exists")
 
-    # Save uploaded files
-    profile_pic_path = save_file(profile_picture, "profile_pictures")
-    tenth_cert_path = save_file(tenth_certificate, "certificates")
-    twelfth_cert_path = save_file(twelfth_certificate, "certificates")
-    college_cert_path = save_file(college_degree_certificate, "certificates")
-
-    aadhaar_photo_path = save_file(aadhaar_card_photo, "documents")
-    pan_photo_path = save_file(pan_card_photo, "documents")
-    resume_path = save_file(resume_cv, "documents")
-    passport_photo_path = save_file(passport_size_photo, "documents")
-    passbook_photo_path = save_file(passbook_photo, "documents")
+    # ✅ Save profile picture in dataset folder
+    profile_pic_path = save_file(profile_picture, DATASET_DIR)
 
     # Insert into MongoDB
     profile_data = {
@@ -132,7 +118,7 @@ async def create_profile(
             "physical_disability": physical_disability,
             "religion": religion,
             "aadhaar_card": aadhaar_card,
-            "profile_picture": profile_pic_path,  # ✅ Store relative file path
+            "profile_picture": profile_pic_path,  # ✅ Stored as dataset/image.jpg
         },
         "contact_details": {
             "mobile_numbers": mobile_numbers,
@@ -150,7 +136,6 @@ async def create_profile(
                 "school_name": tenth_school_name,
                 "state": tenth_state,
                 "total_marks": tenth_total_marks,
-                "certificate": tenth_cert_path,
                 "board": tenth_board,
                 "passing_month_year": tenth_passing_month_year
             },
@@ -158,23 +143,15 @@ async def create_profile(
                 "school_name": twelfth_school_name,
                 "state": twelfth_state,
                 "total_marks": twelfth_total_marks,
-                "certificate": twelfth_cert_path,
                 "board": twelfth_board,
                 "passing_month_year": twelfth_passing_month_year
             },
             "college": {
-                "degree_certificate": college_cert_path,
                 "state": college_state,
                 "district": college_district,
                 "cgpa": college_cgpa,
                 "name": college_name
             }
-        },
-        "documents": {
-            "aadhaar_card_photo": aadhaar_photo_path,
-            "pan_card_photo": pan_photo_path,
-            "resume": resume_path,
-            "passport_size_photo": passport_photo_path
         },
         "bank_details": {
             "account_number": account_number,
@@ -183,8 +160,7 @@ async def create_profile(
             "bank_name": bank_name,
             "branch_name": branch_name,
             "ifsc_code": ifsc_code,
-            "account_type": account_type,
-            "passbook_photo": passbook_photo_path
+            "account_type": account_type
         }
     }
 
@@ -197,29 +173,43 @@ async def get_profile(user_id: str):
     profile = db.profile.find_one({"user_id": user_id})
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
+    
+    # Convert ObjectId to string
     profile["_id"] = str(profile["_id"])
+    
+    # Normalize file path
+    if "profile_picture" in profile["personal_details"]:
+        profile["personal_details"]["profile_picture"] = profile["personal_details"]["profile_picture"].replace("\\", "/")
+    
     return profile
 
-# ✅ 🚀 Update Profile (PUT)
+# ✅ 🚀 Serve Profile Picture (GET)
+from fastapi.responses import FileResponse
+
+@profile_router.get("/profile-picture/{filename}")
+async def get_profile_picture(filename: str):
+    file_path = os.path.join(DATASET_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Image not found")
+    
+    return FileResponse(file_path)
+
+# ✅ 🚀 Update Profile Picture (PUT)
 @profile_router.put("/profile/{user_id}")
-async def update_profile(
-    user_id: str,
-    profile_picture: Optional[UploadFile] = File(None),
-):
-    """Update profile picture"""
-    update_fields = {}
+async def update_profile_picture(user_id: str, profile_picture: UploadFile = File(...)):
+    """Update profile picture in dataset folder"""
 
-    if profile_picture:
-        update_fields["personal_details.profile_picture"] = save_file(profile_picture, "profile_pictures")
+    # ✅ Save new profile picture in dataset folder
+    profile_pic_path = save_file(profile_picture, DATASET_DIR)
 
-    updated_profile = await db.profile.find_one_and_update(
+    # ✅ Correct MongoDB update
+    updated_profile = db.profile.find_one_and_update(
         {"user_id": user_id},
-        {"$set": update_fields},
+        {"$set": {"personal_details.profile_picture": profile_pic_path}},
         return_document=True
     )
 
     if not updated_profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    updated_profile["_id"] = str(updated_profile["_id"])
-    return {"message": "Profile updated successfully", "profile": updated_profile}
+    return {"message": "Profile picture updated successfully", "profile_picture": profile_pic_path}
